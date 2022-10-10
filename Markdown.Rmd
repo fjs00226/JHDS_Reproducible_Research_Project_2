@@ -1,0 +1,247 @@
+---
+title: "Markdown"
+author: "Ji"
+date: "2022-10-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The most harmful events to population health and economic consequence are tornado and flood
+### -A course project for Reproducible Research     
+
+### Synopsis   
+Storm and severe weather events can cause both public health and economic problems for human society. This project uses data from the US National Oceanic and Atmospheric Administration's (NOAA) storm database to answer two questions:    
+1. Across the United States, which types of events are most harmful with respect to population health?    
+2. Across the United States, which types of events have the greatest economic consequences?    
+The events were regrouped by the event type. The most harmful events for population health were evaluated by calculating the numbers of fatalities and injuries. The property and crop damage were used to obtain the worst event for economic consequence.   
+    
+### Data processing    
+The raw data was downloaded from https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2. 
+```{r cache=TRUE}
+# download, read data and get a general idea of the data
+url<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+if(!file.exists("./raw_data")){
+  dir.create("./raw_data")
+}
+download.file(url,"./raw_data/download.csv.bz2")
+data<-read.csv("./raw_data/download.csv.bz2")
+str(data)
+
+data$PROPDMGEXP<-tolower(data$PROPDMGEXP)
+data$CROPDMGEXP<-tolower(data$CROPDMGEXP)
+# any duplication of data?
+nrow(data[duplicated(data),]) # 0
+# any data out of the date range?
+data$BGN_DATE<-as.Date(data$BGN_DATE,format="%m/%d/%Y")
+summary(data$BGN_DATE) # 1950-01-03-2011-11-30, no missing date
+```
+The data contains 902297 observations of 37 variables, including the date-time, type, location, magnitudes, fatalities, injuries, and damages of events from 1950-01-03 to 2011-11-30. There's no duplication of the data.      
+For data analysis, some certain columns were extracted from the raw data and form a new table. The new table (data_v1) contains:   
+EVTYPE event type;   
+FATALITIES number of death;    
+INJURIES number of injuries;    
+PROPDMG number of property damage;    
+PROPDMGEXP unit of property damage ("" 10^0,"k" 10^3, "m" 10^6, "b" 10^9);   
+CROPDMG number of crop damage;   
+CROPDMGEXP unit of crop damage ("" 10^0,"k" 10^3, "m" 10^6, "b" 10^9).    
+```{r}
+# Delete not relative columns
+# Fatalities and injuries for question 1, property and crop damage for question 2 
+data_v1<-data[,c("EVTYPE","FATALITIES","INJURIES"
+                 ,"PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP")]
+
+# Look at the PROPDMGEXP. It should only have "", k, b, and m
+# use lower case for all labels
+# class(data_v1$PROPDMGEXP) # character
+table(data_v1$PROPDMGEXP)
+table(data_v1$CROPDMGEXP)
+rn_data_v1<-nrow(data)
+rn_data_v1 
+```
+PROPDMGEXP and CROPDMGEXP have characters other than "","k","m","b".
+
+Clean the event type (EVTYPE) and re-group them. 
+Steps:    
+- Convert all the characters to lower case.    
+- Delete special symbols.    
+- Remove unwanted spaces from each string    
+- Delete rows with "Summary". This is not a type of event.    
+- Delete numbers.     
+```{r}
+# Use lower case
+data_v1$EVTYPE<-tolower(data_v1$EVTYPE)
+# Replace "/", and "-"with " "
+data_v1$EVTYPE<-gsub("/"," ",data_v1$EVTYPE)
+data_v1$EVTYPE<-gsub("-"," ",data_v1$EVTYPE)
+data_v1$EVTYPE<-trimws(data_v1$EVTYPE,"both")
+events<-unique(data_v1$EVTYPE) # 865 types of different events
+# EVTYPE with summary? remove them
+sum(grepl("summary",data_v1$EVTYPE) ==TRUE) # 76 input with summary
+data_v1<-data_v1[!grepl("summary",data_v1$EVTYPE),]
+rn_data_v1<-nrow(data_v1)
+rn_data_v1 # 902221 rows
+# Remove numbers from events
+data_v1$EVTYPE<-gsub('[0-9.]', "",data_v1$EVTYPE)
+# run events again
+events<-unique(data_v1$EVTYPE) # 729 types of different events
+```
+There are 76 inputs with "Summary", not a big number comparing to the total number of data. There are 729 different types of events. This is a too large number.      
+Re-group the events by their key words.       
+Steps:      
+- Find key words in EVTYPE by unlisting the events and grouping the words.     
+- Assign new group according to the key words.      
+- Assign "other" to unmatched groups.       
+A list of new groups (EVCat, altogether 21 categories):          
+snow/avalanche;    
+wind;    
+flood;   
+rain;   
+thunderstorm/storm;   
+cold/ice;   
+hail;   
+flash/lightning;   
+heat/dry;   
+sleet;   
+blizzard;   
+hurricane;   
+tornado;   
+fog;   
+typhoon;   
+cloud;   
+waterspout;   
+rip current;   
+fire;   
+slide;   
+other.   
+```{r}
+events<- paste(events,collapse = " ")
+events<-as.data.frame(strsplit(events," "))
+events_count<-as.data.frame(table(events))
+colnames(events_count)<-c("word","counts")
+events_count<-events_count[order(-events_count$counts),]
+events_count$word
+# regroup
+data_v1[grepl("snow|snowfall|avalanche|snows",data_v1$EVTYPE),"EVCat"]<-"snow/avalanche"
+data_v1[grepl("wind|winds|win|wind,|winds;|wins",data_v1$EVTYPE),"EVCat"]<-"wind"
+data_v1[grepl("flood|flooding|floods|floodin|floooding",data_v1$EVTYPE),"EVCat"]<-"flood"
+data_v1[grepl("rain|rainfall|rains|rain;|rainstorm|glaze",data_v1$EVTYPE),"EVCat"]<-"rain"
+data_v1[grepl("thunderstorm|thunderstorms|storm|tstm|thunderstormw|thunderstrom
+              |thuderstorm|thundeerstorm|thunderestorm|thundertorm|thundertsorm|thundestorm
+              |thunerstorm|tstmw|tunderstorm",data_v1$EVTYPE),"EVCat"]<-"thunderstorm/storm"
+data_v1[grepl("cold|ice|freezing|freeze|frost|icy|low",data_v1$EVTYPE),"EVCat"]<-"cold/ice"
+data_v1[grepl("hail|hail()|hailstorm|hailstorms",data_v1$EVTYPE),"EVCat"]<-"hail"
+data_v1[grepl("flash|lightning|lighting|ligntning",data_v1$EVTYPE),"EVCat"]<-"flash/lightning"
+data_v1[grepl("heat|high|dry|drought|dryness|warmth|warm|hot",data_v1$EVTYPE),"EVCat"]<-"heat/dry"
+data_v1[grepl("sleet",data_v1$EVTYPE),"EVCat"]<-"sleet"
+data_v1[grepl("blizzard",data_v1$EVTYPE),"EVCat"]<-"blizzard"
+data_v1[grepl("hurricane",data_v1$EVTYPE),"EVCat"]<-"hurricane"
+data_v1[grepl("tornado|tornadoes|tornadoes,|tornados|torndao|gustnado",data_v1$EVTYPE),"EVCat"]<-"tornado"
+data_v1[grepl("fog",data_v1$EVTYPE),"EVCat"]<-"fog"
+data_v1[grepl("typhoon",data_v1$EVTYPE),"EVCat"]<-"typhoon"
+data_v1[grepl("cloud|funnel",data_v1$EVTYPE),"EVCat"]<-"cloud"
+data_v1[grepl("waterspout|water spout",data_v1$EVTYPE),"EVCat"]<-"waterspout"
+data_v1[grepl("rip current",data_v1$EVTYPE),"EVCat"]<-"rip current"
+data_v1[grepl("fire|wildfire",data_v1$EVTYPE),"EVCat"]<-"fire"
+data_v1[grepl("slide",data_v1$EVTYPE),"EVCat"]<-"slide"
+# any row without cat?
+data_v1[is.na(data_v1$EVCat),"EVCat"]<-"other"
+```
+Find 356 words. Some are typos of the event type: eg. "wind","winds","win","wind,",“winds;”,“wins” for wind. category EVTYPE by the key words.     
+
+Generate dataframes for visualization.       
+Steps for population health analysis:         
+- Get the number of fatalities and injuries, merge them by the event group, and calculate the total number of fatalities and injuries, save the result in po_health.      
+- Order po_health in descending order, get the top 5 events, save them in po_health_5.       
+po_health_5 will be used for plotting.          
+```{r}
+fatality<-aggregate(data_v1$FATALITIES,list(data_v1$EVCat),sum)
+colnames(fatality)<-c("EVTYPE","fa_counts")
+injury<-aggregate(data_v1$INJURIES,list(data_v1$EVCat),sum)
+colnames(injury)<-c("EVTYPE","in_counts")
+
+# merge fatality and injury
+po_health<-merge(fatality,injury,by="EVTYPE")
+colnames(po_health)<-c("EVTYPE","fatality","injury")
+po_health$SUM<-po_health$fatality+po_health$injury
+po_health<-po_health[order(-po_health$SUM),]
+po_health_5<-po_health[1:5,]
+```
+Steps for economic damage analysis:       
+- Generate two data frames, one for property damage (data_v2), the other for crop damage (data_v3).        
+- Find rows in which PROPDMGEXP not in c("","k","b","m") in data_v2. Delete those rows.      
+- Find rows in which CROPDMGEXP not in c("","k","b","m") in data_v3. Delete those rows.       
+- Recalculate property damage and crop damage, taking the EXP into consideration. Save the result in new columns (PROPDMG_D for data_v2, CROPDMG_D for data_v3).         
+```{r}
+# remove PROPDMGEXP not in "", k, b, m
+data_v2<-data_v1[data_v1$PROPDMGEXP %in% c("","k","b","m"),]
+rn_data_v2<-nrow(data_v2)
+table(data_v2$PROPDMGEXP) # only have "", b, m, k
+rn_data_v1-rn_data_v2 # 321 rows removed
+# remove CROPDMGEXP not in "", k, b, m
+data_v3<-data_v1[data_v1$CROPDMGEXP %in% c("","k","b","m"),]
+rn_data_v3<-nrow(data_v3) # 902270
+table(data_v3$CROPDMGEXP) # only have "", b, m, k
+rn_data_v1-rn_data_v3 # 27 rows removed
+# recalculate DMG
+data_v2[which(data_v2$PROPDMGEXP==""),"PROPDMG_D"]<-data_v2[which(data_v2$PROPDMGEXP==""),"PROPDMG"]
+data_v2[which(data_v2$PROPDMGEXP=="k"),"PROPDMG_D"]<-data_v2[which(data_v2$PROPDMGEXP=="k"),"PROPDMG"]*1000
+data_v2[which(data_v2$PROPDMGEXP=="b"),"PROPDMG_D"]<-data_v2[which(data_v2$PROPDMGEXP=="b"),"PROPDMG"]*1000000000
+data_v2[which(data_v2$PROPDMGEXP=="m"),"PROPDMG_D"]<-data_v2[which(data_v2$PROPDMGEXP=="m"),"PROPDMG"]*1000000
+
+data_v3[which(data_v3$CROPDMGEXP==""),"CROPDMG_D"]<-data_v3[which(data_v3$CROPDMGEXP==""),"CROPDMG"]
+data_v3[which(data_v3$CROPDMGEXP=="k"),"CROPDMG_D"]<-data_v3[which(data_v3$CROPDMGEXP=="k"),"CROPDMG"]*1000
+data_v3[which(data_v3$CROPDMGEXP=="b"),"CROPDMG_D"]<-data_v3[which(data_v3$CROPDMGEXP=="b"),"CROPDMG"]*1000000000
+data_v3[which(data_v3$CROPDMGEXP=="m"),"CROPDMG_D"]<-data_v3[which(data_v3$CROPDMGEXP=="m"),"CROPDMG"]*1000000
+```
+After cleaning the EXP columns, 321 rows are removed from data_v2, and 27 rows are removed from data_v1.        
+- Get the number of property damage and crop damage, merge them by the event group, and calculate the total number of property damage and crop damage, save the result in dmg.           
+- Order dmg in descending order, get the top 5 events, save them in dmg_5.       
+dmg_5 will be used for plotting.         
+```{r}
+# Sum property damage and crop damage
+property_dmg<-aggregate(data_v2$PROPDMG_D,list(data_v2$EVCat),sum)
+colnames(property_dmg)<-c("EVTYPE","DMG")
+crop_dmg<-aggregate(data_v3$CROPDMG_D,list(data_v3$EVCat),sum)
+colnames(crop_dmg)<-c("EVTYPE","DMG")
+# merge property damage and crop damage
+dmg<-merge(property_dmg,crop_dmg,by="EVTYPE")
+colnames(dmg)<-c("EVTYPE","PROPDMG","CROPDMG")
+dmg$SUM<-dmg$PROPDMG+dmg$CROPDMG
+# order and get the top 5 sum
+dmg<-dmg[order(-dmg$SUM),]
+dmg_5<-dmg[1:5,]
+```
+
+### Results    
+1. Tornado is the most harmful event for public health.        
+```{r}
+#plot
+barplot(t(as.matrix(po_health_5))[2:3,1:5]
+        ,names.arg=c("tornado","heat/dry","thunderstorm\n/storm","flash\n/lightning","flood")
+        ,col=c("green","blue")
+        ,main="Fatality and injury of harmful events",xlab="Event type",ylab="Counts"
+        ,legend.text=c("fatality","injury"))
+
+```
+
+Figure caption: This figure illustrates the top 5 harmful events for public health. The blue and green color indicates the number of injury and fatality respectively.            
+
+2. Flood caused the most severe economic consequence.          
+```{r}
+# plot
+barplot(t(as.matrix(dmg_5))[2:3,1:5]
+        ,main="Economic damage of harmful events"
+        ,names.arg=c("flood","thunderstorm\n/storm","typhoon","tornado","heat/dry")
+        ,col=c("blue","green")
+        ,xlab="Event type", ylab="Dollars",legend.text =c("property","crop"))
+```
+
+Figure caption: This figure illustrates the top 5 harmful events for economic damage. The blue and green color indicates the number of  property and crops respectively.    
+
+### Conclusion
+By analyzing data from 1950-01-03 to 2011-11-30, the conclusion is that:
+1. Tornado is the most harmful event for public health.
+2. Flood caused the most severe economic consequence.
